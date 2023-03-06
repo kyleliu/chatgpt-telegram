@@ -1,171 +1,178 @@
 package chatgpt
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"time"
-
-	"github.com/m1guelpf/chatgpt-telegram/src/config"
-	"github.com/m1guelpf/chatgpt-telegram/src/expirymap"
-	"github.com/m1guelpf/chatgpt-telegram/src/sse"
 )
 
-const KEY_ACCESS_TOKEN = "accessToken"
-const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+const CHATGPT_BASELINE = "你是一个代码写作助手，你的名字叫多多。"
 
-type Conversation struct {
-	ID            string
-	LastMessageID string
+type ChatGPTConversation struct {
+	ChatID   int64
+	Messages []*ChatGPTMessage
+	Usage    *ChatGPTUsage
 }
 
 type ChatGPT struct {
-	SessionToken   string
-	AccessTokenMap expirymap.ExpiryMap
-	conversations  map[int64]Conversation
+	OpenAIKey     string
+	Conversations map[int64]*ChatGPTConversation
 }
 
-type SessionResult struct {
-	Error       string `json:"error"`
-	Expires     string `json:"expires"`
-	AccessToken string `json:"accessToken"`
+type ChatGPTMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
-type MessageResponse struct {
-	ConversationId string `json:"conversation_id"`
-	Error          string `json:"error"`
-	Message        struct {
-		ID      string `json:"id"`
-		Content struct {
-			Parts []string `json:"parts"`
-		} `json:"content"`
+type ChatGPTRequest struct {
+	Model       string            `json:"model"`
+	Messages    []*ChatGPTMessage `json:"messages"`
+	Temperature float32           `json:"temperature"`
+}
+
+type ChatGPTMessageChoice struct {
+	Index   int `json:"index"`
+	Message struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
 	} `json:"message"`
+	FinishReason string `json:"finish_reason"`
+}
+
+type ChatGPTUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type ChatGPTResponse struct {
+	ID      string                 `json:"id"`
+	Object  string                 `json:"object"`
+	Created int64                  `json:"created"`
+	Choices []ChatGPTMessageChoice `json:"choices"`
+	Usage   ChatGPTUsage           `json:"usage"`
 }
 
 type ChatResponse struct {
 	Message string
 }
 
-func Init(config *config.Config) *ChatGPT {
+func Init(apiKey string) *ChatGPT {
 	return &ChatGPT{
-		AccessTokenMap: expirymap.New(),
-		SessionToken:   config.OpenAISession,
-		conversations:  make(map[int64]Conversation),
+		OpenAIKey:     apiKey,
+		Conversations: map[int64]*ChatGPTConversation{},
 	}
 }
 
-func (c *ChatGPT) IsAuthenticated() bool {
-	_, err := c.refreshAccessToken()
-	return err == nil
+func (c *ChatGPT) ResetConversation(chatID int64, basecmd string) {
+	messages := []*ChatGPTMessage{}
+	if basecmd != "" {
+		messages = append(messages, &ChatGPTMessage{
+			Role:    "system",
+			Content: basecmd,
+		})
+	}
+	c.Conversations[chatID] = &ChatGPTConversation{
+		ChatID:   chatID,
+		Messages: messages,
+		Usage: &ChatGPTUsage{
+			PromptTokens:     0,
+			CompletionTokens: 0,
+			TotalTokens:      0,
+		},
+	}
 }
 
-func (c *ChatGPT) EnsureAuth() error {
-	_, err := c.refreshAccessToken()
-	return err
+func (c *ChatGPT) UpdateMessage(chatID int64, role string, message string) []*ChatGPTMessage {
+	conversation, ok := c.Conversations[chatID]
+	if !ok {
+		c.ResetConversation(chatID, CHATGPT_BASELINE)
+		conversation = c.Conversations[chatID]
+	}
+
+	conversation.Messages = append(conversation.Messages, &ChatGPTMessage{
+		Role:    role,
+		Content: message,
+	})
+
+	if len(conversation.Messages) > 13 {
+		len := len(conversation.Messages)
+		conversation.Messages = append(conversation.Messages[:1],
+			conversation.Messages[len-12:len]...)
+	}
+
+	return conversation.Messages
 }
 
-func (c *ChatGPT) ResetConversation(chatID int64) {
-	c.conversations[chatID] = Conversation{}
+func (c *ChatGPT) UpdateUsage(chatID int64, usage *ChatGPTUsage) {
+	if conversation, ok := c.Conversations[chatID]; ok {
+		conversation.Usage.PromptTokens += usage.PromptTokens
+		conversation.Usage.CompletionTokens += usage.CompletionTokens
+		conversation.Usage.TotalTokens += usage.TotalTokens
+	}
 }
 
-func (c *ChatGPT) SendMessage(message string, tgChatID int64) (chan ChatResponse, error) {
-	accessToken, err := c.refreshAccessToken()
+func (c *ChatGPT) SendMessage(message string, chatID int64) (*ChatResponse, error) {
+	messages := c.UpdateMessage(chatID, "user", message)
+	requestBody, err := json.Marshal(ChatGPTRequest{
+		Model:       "gpt-3.5-turbo",
+		Messages:    messages,
+		Temperature: 0.1,
+	})
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Couldn't get access token: %v", err))
+		log.Printf("Error sending message: %v", err)
+		return nil, err
 	}
 
-	client := sse.Init("https://chat.openai.com/backend-api/conversation")
-
-	client.Headers = map[string]string{
-		"User-Agent":    USER_AGENT,
-		"Authorization": fmt.Sprintf("Bearer %s", accessToken),
-	}
-
-	convo := c.conversations[tgChatID]
-	err = client.Connect(message, convo.ID, convo.LastMessageID)
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
+		bytes.NewBuffer(requestBody))
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Couldn't connect to ChatGPT: %v", err))
+		log.Printf("Error sending message: %v", err)
+		return nil, err
 	}
 
-	r := make(chan ChatResponse)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.OpenAIKey))
 
-	go func() {
-		defer close(r)
-	mainLoop:
-		for {
-			select {
-			case chunk, ok := <-client.EventChannel:
-				if !ok {
-					break mainLoop
-				}
-
-				var res MessageResponse
-				err := json.Unmarshal([]byte(chunk), &res)
-				if err != nil {
-					log.Printf("Couldn't unmarshal message response: %v", err)
-					continue
-				}
-
-				if len(res.Message.Content.Parts) > 0 {
-					convo.ID = res.ConversationId
-					convo.LastMessageID = res.Message.ID
-					c.conversations[tgChatID] = convo
-
-					r <- ChatResponse{Message: res.Message.Content.Parts[0]}
-				}
-			}
-		}
-	}()
-
-	return r, nil
-}
-
-func (c *ChatGPT) refreshAccessToken() (string, error) {
-	cachedAccessToken, ok := c.AccessTokenMap.Get(KEY_ACCESS_TOKEN)
-	if ok {
-		return cachedAccessToken, nil
-	}
-
-	req, err := http.NewRequest("GET", "https://chat.openai.com/api/auth/session", nil)
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
+		log.Printf("Error sending message: %v", err)
+		return nil, err
 	}
+	defer resp.Body.Close()
 
-	req.Header.Set("User-Agent", USER_AGENT)
-	req.Header.Set("Cookie", fmt.Sprintf("__Secure-next-auth.session-token=%s", c.SessionToken))
-
-	res, err := http.DefaultClient.Do(req)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to perform request: %v", err)
+		log.Printf("Error sending message: %v", err)
+		return nil, err
 	}
-	defer res.Body.Close()
 
-	var result SessionResult
-	err = json.NewDecoder(res.Body).Decode(&result)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Error sending message: %v", err)
+		return nil, fmt.Errorf(
+			"error sending message: %v",
+			resp.Status)
+	}
+
+	var response ChatGPTResponse
+	err = json.Unmarshal(body, &response)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode response: %v", err)
+		log.Printf("Error sending message: %v", err)
+		return nil, err
 	}
 
-	accessToken := result.AccessToken
-	if accessToken == "" {
-		return "", errors.New("unauthorized")
+	if len(response.Choices) == 0 {
+		log.Printf("Error sending message: %v", err)
+		return nil, fmt.Errorf("no choices")
 	}
 
-	if result.Error != "" {
-		if result.Error == "RefreshAccessTokenError" {
-			return "", errors.New("Session token has expired")
-		}
-
-		return "", errors.New(result.Error)
-	}
-
-	expiryTime, err := time.Parse(time.RFC3339, result.Expires)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse expiry time: %v", err)
-	}
-	c.AccessTokenMap.Set(KEY_ACCESS_TOKEN, accessToken, expiryTime.Sub(time.Now()))
-
-	return accessToken, nil
+	reply := response.Choices[0].Message.Content
+	c.UpdateMessage(chatID, "assistant", reply)
+	c.UpdateUsage(chatID, &response.Usage)
+	reply += fmt.Sprintf("\n\n本次花费`%v`个tokens", response.Usage.TotalTokens)
+	return &ChatResponse{Message: reply}, nil
 }

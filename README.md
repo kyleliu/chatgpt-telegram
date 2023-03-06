@@ -5,7 +5,7 @@
 Go CLI to fuels a Telegram bot that lets you interact with [ChatGPT](https://openai.com/blog/chatgpt/), a large language model trained by OpenAI.
 
 ## Installation
-Download the file corresponding to your OS in the [releases page](https://github.com/m1guelpf/chatgpt-telegram/releases/latest). 
+Download the file corresponding to your OS in the [releases page](https://github.com/kyleliu/chatgpt-telegram/releases/latest). 
 - `chatgpt-telegram-Darwin-amd64`: macOS (Intel)
 - `chatgpt-telegram-Darwin-arm64`: macOS (M1)
 - `chatgpt-telegram-Linux-amd64`: Linux
@@ -31,7 +31,7 @@ Finally, open the terminal in your computer (if you're on windows, look for `Pow
 If you're trying to run this on a server with an existing Docker setup, you might want to use our Docker image instead.
 
 ```sh
-docker pull ghcr.io/m1guelpf/chatgpt-telegram
+docker pull ghcr.io/kyleliu/chatgpt-telegram
 ```
 
 Here's how you'd set things up with `docker-compose`:
@@ -39,7 +39,7 @@ Here's how you'd set things up with `docker-compose`:
 ```yaml
 services:
   chatgpt-telegram:
-    image: ghcr.io/m1guelpf/chatgpt-telegram
+    image: ghcr.io/kyleliu/chatgpt-telegram
     container_name: chatgpt-telegram
     volumes:
       # your ".config" local folder must include a "chatgpt.json" file

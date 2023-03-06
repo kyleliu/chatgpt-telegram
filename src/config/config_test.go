@@ -46,11 +46,13 @@ func TestLoadEnvConfig(t *testing.T) {
 		"all values empty in file and env": {
 			fileContent: `TELEGRAM_ID=
 TELEGRAM_TOKEN=
-EDIT_WAIT_SECONDS=`,
+EDIT_WAIT_SECONDS=
+OPENAI_API_KEY=`,
 			want: &EnvConfig{
 				TelegramID:      []int64{},
 				TelegramToken:   "",
 				EditWaitSeconds: 0,
+				OpenAIKey:       "",
 			},
 		},
 		"no file, all values through env": {
@@ -58,53 +60,63 @@ EDIT_WAIT_SECONDS=`,
 				"TELEGRAM_ID":       "123,456",
 				"TELEGRAM_TOKEN":    "token",
 				"EDIT_WAIT_SECONDS": "10",
+				"OPENAI_API_KEY":    "APIKEY",
 			},
 			want: &EnvConfig{
 				TelegramID:      []int64{123, 456},
 				TelegramToken:   "token",
 				EditWaitSeconds: 10,
+				OpenAIKey:       "APIKEY",
 			},
 		},
 		"all values provided in file, single TELEGRAM_ID": {
 			fileContent: `TELEGRAM_ID=123
 TELEGRAM_TOKEN=abc
-EDIT_WAIT_SECONDS=10`,
+EDIT_WAIT_SECONDS=10
+OPENAI_API_KEY=xxx`,
 			want: &EnvConfig{
 				TelegramID:      []int64{123},
 				TelegramToken:   "abc",
 				EditWaitSeconds: 10,
+				OpenAIKey:       "xxx",
 			},
 		},
 		"multiple TELEGRAM_IDs provided in file": {
 			fileContent: `TELEGRAM_ID=123,456
 TELEGRAM_TOKEN=abc
-EDIT_WAIT_SECONDS=10`,
+EDIT_WAIT_SECONDS=10
+OPENAI_API_KEY=xxx`,
 			envVars: map[string]string{},
 			want: &EnvConfig{
 				TelegramID:      []int64{123, 456},
 				TelegramToken:   "abc",
 				EditWaitSeconds: 10,
+				OpenAIKey:       "xxx",
 			},
 		},
 		"env variables should override file values": {
 			fileContent: `TELEGRAM_ID=123
 TELEGRAM_TOKEN=abc
-EDIT_WAIT_SECONDS=10`,
+EDIT_WAIT_SECONDS=10
+OPENAI_API_KEY=xxx`,
 			envVars: map[string]string{
 				"TELEGRAM_ID":       "456",
 				"TELEGRAM_TOKEN":    "def",
 				"EDIT_WAIT_SECONDS": "20",
+				"OPENAI_API_KEY":    "OOO",
 			},
 			want: &EnvConfig{
 				TelegramID:      []int64{456},
 				TelegramToken:   "def",
 				EditWaitSeconds: 20,
+				OpenAIKey:       "OOO",
 			},
 		},
 		"multiple TELEGRAM_IDs provided in env": {
 			fileContent: `TELEGRAM_ID=123
 TELEGRAM_TOKEN=abc
-EDIT_WAIT_SECONDS=10`,
+EDIT_WAIT_SECONDS=10
+OPENAI_API_KEY=xxx`,
 			envVars: map[string]string{
 				"TELEGRAM_ID": "456,789",
 			},
@@ -112,6 +124,7 @@ EDIT_WAIT_SECONDS=10`,
 				TelegramID:      []int64{456, 789},
 				TelegramToken:   "abc",
 				EditWaitSeconds: 10,
+				OpenAIKey:       "xxx",
 			},
 		},
 	} {

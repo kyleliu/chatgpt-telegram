@@ -1,54 +1,85 @@
 package config
 
 import (
+	"bytes"
 	"errors"
-	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/viper"
 )
 
-type Config struct {
-	v *viper.Viper
-
-	OpenAISession string
+type EnvConfig struct {
+	TelegramID      []int64 `mapstructure:"TELEGRAM_ID"`
+	TelegramToken   string  `mapstructure:"TELEGRAM_TOKEN"`
+	EditWaitSeconds int     `mapstructure:"EDIT_WAIT_SECONDS"`
+	OpenAIKey       string  `mapstructure:"OPENAI_API_KEY"`
 }
 
-// LoadOrCreatePersistentConfig uses the default config directory for the current OS
-// to load or create a config file named "chatgpt.json"
-func LoadOrCreatePersistentConfig() (*Config, error) {
-	configPath, err := os.UserConfigDir()
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Couldn't get user config dir: %v", err))
-	}
-	v := viper.New()
-	v.SetConfigType("json")
-	v.SetConfigName("chatgpt")
-	v.AddConfigPath(configPath)
+// emptyConfig is used to initialize viper.
+// It is required to register config keys with viper when in case no config file is provided.
+const emptyConfig = `TELEGRAM_ID=
+TELEGRAM_TOKEN=
+EDIT_WAIT_SECONDS=
+OPENAI_API_KEY=`
 
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			if err := v.SafeWriteConfig(); err != nil {
-				return nil, errors.New(fmt.Sprintf("Couldn't create config file: %v", err))
-			}
-		} else {
-			return nil, errors.New(fmt.Sprintf("Couldn't read config file: %v", err))
+func (e *EnvConfig) HasTelegramID(id int64) bool {
+	for _, v := range e.TelegramID {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// LoadEnvConfig loads config from .env file, variables from environment take precedence if provided.
+// If no .env file is provided, config is loaded from environment variables.
+func LoadEnvConfig(path string) (*EnvConfig, error) {
+	fileExists := fileExists(path)
+	if !fileExists {
+		log.Printf("config file %s does not exist, using env variables", path)
+	}
+
+	v := viper.New()
+	v.SetConfigType("env")
+	v.AutomaticEnv()
+	if err := v.ReadConfig(bytes.NewBufferString(emptyConfig)); err != nil {
+		return nil, err
+	}
+	if fileExists {
+		v.SetConfigFile(path)
+		if err := v.ReadInConfig(); err != nil {
+			return nil, err
 		}
 	}
 
-	var cfg Config
-	err = v.Unmarshal(&cfg)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Error parsing config: %v", err))
+	var cfg EnvConfig
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, err
 	}
-	cfg.v = v
-
 	return &cfg, nil
 }
 
-func (cfg *Config) SetSessionToken(token string) error {
-	// key must match the struct field name
-	cfg.v.Set("OpenAISession", token)
-	cfg.OpenAISession = token
-	return cfg.v.WriteConfig()
+func fileExists(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return os.IsExist(err)
+	}
+	return true
+}
+
+func (e *EnvConfig) ValidateWithDefaults() error {
+	if e.TelegramToken == "" {
+		return errors.New("TELEGRAM_TOKEN is not set")
+	}
+	if e.OpenAIKey == "" {
+		return errors.New("OPENAI_API_KEY is not set")
+	}
+	if len(e.TelegramID) == 0 {
+		log.Printf("TELEGRAM_ID is not set, all users will be able to use the bot")
+	}
+	if e.EditWaitSeconds < 0 {
+		log.Printf("EDIT_WAIT_SECONDS not set, defaulting to 1")
+		e.EditWaitSeconds = 1
+	}
+	return nil
 }

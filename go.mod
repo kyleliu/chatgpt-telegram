@@ -1,4 +1,4 @@
-module github.com/m1guelpf/chatgpt-telegram
+module github.com/kyleliu/chatgpt-telegram
 
 go 1.19
 

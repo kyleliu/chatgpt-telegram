@@ -6,12 +6,13 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/m1guelpf/chatgpt-telegram/src/chatgpt"
-	"github.com/m1guelpf/chatgpt-telegram/src/markdown"
-	"github.com/m1guelpf/chatgpt-telegram/src/ratelimit"
+	"github.com/kyleliu/chatgpt-telegram/src/chatgpt"
+	"github.com/kyleliu/chatgpt-telegram/src/markdown"
+	"github.com/kyleliu/chatgpt-telegram/src/ratelimit"
 )
 
 type Bot struct {
+	ID           int64
 	Username     string
 	api          *tgbotapi.BotAPI
 	editInterval time.Duration
@@ -29,8 +30,10 @@ func New(token string, editInterval time.Duration) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
+	api.Debug = true
 
 	return &Bot{
+		ID:           api.Self.ID,
 		Username:     api.Self.UserName,
 		api:          api,
 		editInterval: editInterval,
@@ -50,7 +53,9 @@ func (b *Bot) Stop() {
 func (b *Bot) Send(chatID int64, replyTo int, text string) (tgbotapi.Message, error) {
 	text = markdown.EnsureFormatting(text)
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyToMessageID = replyTo
+	if replyTo != 0 {
+		msg.ReplyToMessageID = replyTo
+	}
 	return b.api.Send(msg)
 }
 
@@ -73,7 +78,7 @@ func (b *Bot) SendTyping(chatID int64) {
 	}
 }
 
-func (b *Bot) SendAsLiveOutput(chatID int64, replyTo int, feed chan chatgpt.ChatResponse) {
+func (b *Bot) SendAsLiveOutput(chatID int64, replyTo int, response *chatgpt.ChatResponse) {
 	debouncedType := ratelimit.Debounce(10*time.Second, func() { b.SendTyping(chatID) })
 	debouncedEdit := ratelimit.DebounceWithArgs(b.editInterval, func(text interface{}, messageId interface{}) {
 		if err := b.SendEdit(chatID, messageId.(int), text.(string)); err != nil {
@@ -83,27 +88,17 @@ func (b *Bot) SendAsLiveOutput(chatID int64, replyTo int, feed chan chatgpt.Chat
 
 	var message tgbotapi.Message
 	var lastResp string
-
-pollResponse:
-	for {
+	{
 		debouncedType()
 
-		select {
-		case response, ok := <-feed:
-			if !ok {
-				break pollResponse
+		lastResp = response.Message
+		if message.MessageID == 0 {
+			var err error
+			if message, err = b.Send(chatID, replyTo, lastResp); err != nil {
+				log.Fatalf("Couldn't send message: %v", err)
 			}
-
-			lastResp = response.Message
-
-			if message.MessageID == 0 {
-				var err error
-				if message, err = b.Send(chatID, replyTo, lastResp); err != nil {
-					log.Fatalf("Couldn't send message: %v", err)
-				}
-			} else {
-				debouncedEdit(lastResp, message.MessageID)
-			}
+		} else {
+			debouncedEdit(lastResp, message.MessageID)
 		}
 	}
 
