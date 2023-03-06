@@ -47,12 +47,14 @@ func TestLoadEnvConfig(t *testing.T) {
 			fileContent: `TELEGRAM_ID=
 TELEGRAM_TOKEN=
 EDIT_WAIT_SECONDS=
-OPENAI_API_KEY=`,
+OPENAI_API_KEY=
+PROMPT_INIT=`,
 			want: &EnvConfig{
 				TelegramID:      []int64{},
 				TelegramToken:   "",
 				EditWaitSeconds: 0,
 				OpenAIKey:       "",
+				PromptInit:      "",
 			},
 		},
 		"no file, all values through env": {
@@ -61,62 +63,72 @@ OPENAI_API_KEY=`,
 				"TELEGRAM_TOKEN":    "token",
 				"EDIT_WAIT_SECONDS": "10",
 				"OPENAI_API_KEY":    "APIKEY",
+				"PROMPT_INIT":       "dodo",
 			},
 			want: &EnvConfig{
 				TelegramID:      []int64{123, 456},
 				TelegramToken:   "token",
 				EditWaitSeconds: 10,
 				OpenAIKey:       "APIKEY",
+				PromptInit:      "dodo",
 			},
 		},
 		"all values provided in file, single TELEGRAM_ID": {
 			fileContent: `TELEGRAM_ID=123
 TELEGRAM_TOKEN=abc
 EDIT_WAIT_SECONDS=10
-OPENAI_API_KEY=xxx`,
+OPENAI_API_KEY=xxx
+PROMPT_INIT=dodo`,
 			want: &EnvConfig{
 				TelegramID:      []int64{123},
 				TelegramToken:   "abc",
 				EditWaitSeconds: 10,
 				OpenAIKey:       "xxx",
+				PromptInit:      "dodo",
 			},
 		},
 		"multiple TELEGRAM_IDs provided in file": {
 			fileContent: `TELEGRAM_ID=123,456
 TELEGRAM_TOKEN=abc
 EDIT_WAIT_SECONDS=10
-OPENAI_API_KEY=xxx`,
+OPENAI_API_KEY=xxx
+PROMPT_INIT=dodo`,
 			envVars: map[string]string{},
 			want: &EnvConfig{
 				TelegramID:      []int64{123, 456},
 				TelegramToken:   "abc",
 				EditWaitSeconds: 10,
 				OpenAIKey:       "xxx",
+				PromptInit:      "dodo",
 			},
 		},
 		"env variables should override file values": {
 			fileContent: `TELEGRAM_ID=123
 TELEGRAM_TOKEN=abc
 EDIT_WAIT_SECONDS=10
-OPENAI_API_KEY=xxx`,
+OPENAI_API_KEY=xxx
+PROMPT_INIT=dodo`,
 			envVars: map[string]string{
 				"TELEGRAM_ID":       "456",
 				"TELEGRAM_TOKEN":    "def",
 				"EDIT_WAIT_SECONDS": "20",
 				"OPENAI_API_KEY":    "OOO",
+				"PROMPT_INIT":       "soso",
 			},
 			want: &EnvConfig{
 				TelegramID:      []int64{456},
 				TelegramToken:   "def",
 				EditWaitSeconds: 20,
 				OpenAIKey:       "OOO",
+				PromptInit:      "soso",
 			},
 		},
 		"multiple TELEGRAM_IDs provided in env": {
 			fileContent: `TELEGRAM_ID=123
 TELEGRAM_TOKEN=abc
 EDIT_WAIT_SECONDS=10
-OPENAI_API_KEY=xxx`,
+OPENAI_API_KEY=xxx
+PROMPT_INIT=dodo`,
 			envVars: map[string]string{
 				"TELEGRAM_ID": "456,789",
 			},
@@ -125,6 +137,7 @@ OPENAI_API_KEY=xxx`,
 				TelegramToken:   "abc",
 				EditWaitSeconds: 10,
 				OpenAIKey:       "xxx",
+				PromptInit:      "dodo",
 			},
 		},
 	} {

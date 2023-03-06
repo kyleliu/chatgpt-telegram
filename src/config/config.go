@@ -14,6 +14,7 @@ type EnvConfig struct {
 	TelegramToken   string  `mapstructure:"TELEGRAM_TOKEN"`
 	EditWaitSeconds int     `mapstructure:"EDIT_WAIT_SECONDS"`
 	OpenAIKey       string  `mapstructure:"OPENAI_API_KEY"`
+	PromptInit      string  `mapstructure:"PROMPT_INIT"`
 }
 
 // emptyConfig is used to initialize viper.
@@ -21,7 +22,8 @@ type EnvConfig struct {
 const emptyConfig = `TELEGRAM_ID=
 TELEGRAM_TOKEN=
 EDIT_WAIT_SECONDS=
-OPENAI_API_KEY=`
+OPENAI_API_KEY=
+PROMPT_INIT=`
 
 func (e *EnvConfig) HasTelegramID(id int64) bool {
 	for _, v := range e.TelegramID {
@@ -80,6 +82,9 @@ func (e *EnvConfig) ValidateWithDefaults() error {
 	if e.EditWaitSeconds < 0 {
 		log.Printf("EDIT_WAIT_SECONDS not set, defaulting to 1")
 		e.EditWaitSeconds = 1
+	}
+	if e.PromptInit == "" {
+		log.Printf("PROMPT_INIT not set, defaulting to empty")
 	}
 	return nil
 }

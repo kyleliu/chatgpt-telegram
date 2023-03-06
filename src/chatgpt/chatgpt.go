@@ -5,21 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	"github.com/sirupsen/logrus"
 )
-
-const CHATGPT_BASELINE = "你是一个代码写作助手，你的名字叫多多。"
-
-type ChatGPTConversation struct {
-	ChatID   int64
-	Messages []*ChatGPTMessage
-	Usage    *ChatGPTUsage
-}
 
 type ChatGPT struct {
 	OpenAIKey     string
-	Conversations map[int64]*ChatGPTConversation
+	Conversations map[string]*ChatGPTConversation
+	PromptInit    string
+	Usage         ChatGPTUsage
+	Logger        *logrus.Logger
+}
+
+type ChatGPTConversation struct {
+	ChatID   string
+	Messages []*ChatGPTMessage
+	Usage    *ChatGPTUsage
 }
 
 type ChatGPTMessage struct {
@@ -60,21 +62,30 @@ type ChatResponse struct {
 	Message string
 }
 
-func Init(apiKey string) *ChatGPT {
+func Init(apiKey string, prompt string, logger *logrus.Logger) *ChatGPT {
 	return &ChatGPT{
 		OpenAIKey:     apiKey,
-		Conversations: map[int64]*ChatGPTConversation{},
+		Conversations: map[string]*ChatGPTConversation{},
+		PromptInit:    prompt,
+		Usage: ChatGPTUsage{
+			PromptTokens:     0,
+			CompletionTokens: 0,
+			TotalTokens:      0,
+		},
+		Logger: logger,
 	}
 }
 
-func (c *ChatGPT) ResetConversation(chatID int64, basecmd string) {
+func (c *ChatGPT) ResetConversation(chatID string, basecmd string) {
 	messages := []*ChatGPTMessage{}
-	if basecmd != "" {
-		messages = append(messages, &ChatGPTMessage{
-			Role:    "system",
-			Content: basecmd,
-		})
+	if basecmd == "" {
+		basecmd = c.PromptInit
 	}
+	messages = append(messages, &ChatGPTMessage{
+		Role:    "system",
+		Content: basecmd,
+	})
+
 	c.Conversations[chatID] = &ChatGPTConversation{
 		ChatID:   chatID,
 		Messages: messages,
@@ -86,10 +97,10 @@ func (c *ChatGPT) ResetConversation(chatID int64, basecmd string) {
 	}
 }
 
-func (c *ChatGPT) UpdateMessage(chatID int64, role string, message string) []*ChatGPTMessage {
+func (c *ChatGPT) UpdateMessage(chatID string, role string, message string) []*ChatGPTMessage {
 	conversation, ok := c.Conversations[chatID]
 	if !ok {
-		c.ResetConversation(chatID, CHATGPT_BASELINE)
+		c.ResetConversation(chatID, c.PromptInit)
 		conversation = c.Conversations[chatID]
 	}
 
@@ -107,7 +118,10 @@ func (c *ChatGPT) UpdateMessage(chatID int64, role string, message string) []*Ch
 	return conversation.Messages
 }
 
-func (c *ChatGPT) UpdateUsage(chatID int64, usage *ChatGPTUsage) {
+func (c *ChatGPT) UpdateUsage(chatID string, usage *ChatGPTUsage) {
+	c.Usage.PromptTokens += usage.PromptTokens
+	c.Usage.CompletionTokens += usage.CompletionTokens
+	c.Usage.TotalTokens += usage.TotalTokens
 	if conversation, ok := c.Conversations[chatID]; ok {
 		conversation.Usage.PromptTokens += usage.PromptTokens
 		conversation.Usage.CompletionTokens += usage.CompletionTokens
@@ -115,22 +129,22 @@ func (c *ChatGPT) UpdateUsage(chatID int64, usage *ChatGPTUsage) {
 	}
 }
 
-func (c *ChatGPT) SendMessage(message string, chatID int64) (*ChatResponse, error) {
+func (c *ChatGPT) SendMessage(chatID string, message string) (*ChatResponse, error) {
 	messages := c.UpdateMessage(chatID, "user", message)
+	msg, _ := json.Marshal(messages)
+	c.Logger.Info(string(msg))
 	requestBody, err := json.Marshal(ChatGPTRequest{
 		Model:       "gpt-3.5-turbo",
 		Messages:    messages,
 		Temperature: 0.1,
 	})
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
 		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions",
 		bytes.NewBuffer(requestBody))
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
 		return nil, err
 	}
 
@@ -140,19 +154,16 @@ func (c *ChatGPT) SendMessage(message string, chatID int64) (*ChatResponse, erro
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Error sending message: %v", err)
 		return nil, fmt.Errorf(
 			"error sending message: %v",
 			resp.Status)
@@ -161,12 +172,10 @@ func (c *ChatGPT) SendMessage(message string, chatID int64) (*ChatResponse, erro
 	var response ChatGPTResponse
 	err = json.Unmarshal(body, &response)
 	if err != nil {
-		log.Printf("Error sending message: %v", err)
 		return nil, err
 	}
 
 	if len(response.Choices) == 0 {
-		log.Printf("Error sending message: %v", err)
 		return nil, fmt.Errorf("no choices")
 	}
 

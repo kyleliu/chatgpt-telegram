@@ -30,7 +30,6 @@ func New(token string, editInterval time.Duration) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	api.Debug = true
 
 	return &Bot{
 		ID:           api.Self.ID,
