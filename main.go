@@ -151,9 +151,9 @@ func main() {
 		var text string
 		switch update.Message.Command() {
 		case "help":
-			text = "发送一条消息开始与ChatGPT交谈。您可以在任何时候使用 /reload 清除对话历史并重新开始（不用担心，它不会删除Telegram消息）。"
+			text = "发送一条消息开始与ChatGPT交谈。您可以在任何时候使用`/reload [参数]`清除对话历史并重新开始（不用担心，它不会删除Telegram消息）。"
 		case "start":
-			text = "发送一条消息开始与ChatGPT交谈。您可以在任何时候使用 /reload 清除对话历史并重新开始（不用担心，它不会删除Telegram消息）。"
+			text = "发送一条消息开始与ChatGPT交谈。您可以在任何时候使用`/reload [参数]`清除对话历史并重新开始（不用担心，它不会删除Telegram消息）。"
 		case "reload":
 			chatGPT.ResetConversation(gptChatID, update.Message.CommandArguments())
 			text = "好的，让我们重新开始吧！"
